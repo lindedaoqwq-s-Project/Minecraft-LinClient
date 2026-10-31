@@ -1,4 +1,16 @@
-# LinClient
+<div align="center">
+  <img src="gunmu" alt="LinClient Icon" width="120" style="border-radius: 24px;">
+</div>
+
+<h1 align="center">LinClient</h1>
+<p align="center"><sub>A Minecraft Client</sub></p>
+
+<div align="center">
+  <img alt="Build Status" src="https://github.com/lindedaoqwq-s-Project/Minecraft-LinClient/actions/workflows/development.yml/badge.svg?branch=main">
+  <img alt="Downloads" src="https://img.shields.io/github/downloads/lindedaoqwq-s-Project/Minecraft-LinClient/total?label=Downloads&style=flat">
+  <img alt="Release" src="https://img.shields.io/github/v/release/lindedaoqwq-s-Project/Minecraft-LinClient?style=flat">
+  <img alt="License" src="https://img.shields.io/github/license/lindedaoqwq-s-Project/Minecraft-LinClient?style=flat">
+</div>
 
 > [!IMPORTANT]
 > LinClient因为某些原因现在计划一个大更新
