@@ -51,9 +51,17 @@ public class EngineHooks {
         } catch (Throwable t) { return false; }
     }
 
-    /** Retired feature: never intercept. Signature kept for the injected guard. */
+    /** No Hurt Cam module: suppress hurtCameraEffect when enabled. Signature kept for
+     *  the injected guard; must never throw (guarded for early-startup calls). */
     public static boolean noHurtCam() {
-        return false;
+        try {
+            com.lindedaoqwq.linclient.module.impl.render.NoHurtCam m =
+                    com.lindedaoqwq.linclient.module.ModuleManager.get(
+                            com.lindedaoqwq.linclient.module.impl.render.NoHurtCam.class);
+            return m != null && m.isEnabled();
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /** Retired feature: never drop a particle. Signature kept for the injected guard. */

@@ -1,19 +1,17 @@
 package com.lindedaoqwq.linclient.state;
 
-import net.minecraft.client.Minecraft;
-
-import java.lang.reflect.Field;
 import java.util.ArrayDeque;
 
 /**
- * Runtime, non-persistent client state used by the HUD modules and the event handler.
- * Nothing here is sent to or read from the server.
+ * Runtime, non-persistent client state shared by modules and the bridge: frame
+ * counters, click queues, session stats. Nothing here is sent to or read from the
+ * server. Per-module state (combo, zoom, ...) lives inside its module class.
  */
 public class ClientState {
     public static boolean modActive = true;
     public static boolean hudEnabled = true;
 
-    // Movement
+    // Movement (updated by ForgeBridge each tick)
     public static double speed = 0.0;        // blocks / second
     public static double distance = 0.0;     // total horizontal distance travelled
     public static double prevX = 0, prevY = 0, prevZ = 0;
@@ -22,29 +20,21 @@ public class ClientState {
     // Session
     public static long sessionStart = System.currentTimeMillis();   // playtime module
 
-    // Input / clicks
+    // Input / clicks (updated by ForgeBridge on mouse events)
     public static boolean leftHeld = false, rightHeld = false;
-    public static final ArrayDeque<Long> leftClickTimes = new ArrayDeque<>();
-    public static final ArrayDeque<Long> rightClickTimes = new ArrayDeque<>();
+    public static final ArrayDeque<Long> leftClickTimes = new ArrayDeque<Long>();
+    public static final ArrayDeque<Long> rightClickTimes = new ArrayDeque<Long>();
 
-    // Damage taken (hitcolour screen flash)
-    public static long lastDamageTakenTime = 0;
+    // Self latency, ms (updated by ForgeBridge each tick)
+    public static int ping = 0;
 
-    // Combat
-    public static int combo = 0;
-    public static long comboExpire = 0;
-    public static float reach = 0;            // last attack distance (blocks)
-    public static long reachExpire = 0;       // when reach display expires
-    public static int ping = 0;               // self latency, ms
-
-    // FPS is self-counted every rendered frame and computed once per second. This is reliable and
-    // identical across versions (the old reflection read of debugFPS could get stuck at 1).
+    // FPS is self-counted every rendered frame and computed once per second.
     public static int fps = 0;
     private static int frameCounter = 0;
     private static long fpsTimestamp = System.currentTimeMillis();
 
-    /** Call once per rendered frame (from the HUD overlay event). Counts frames and reports the
-     *  smoothed frames-per-second every ~1s. */
+    /** Call once per rendered frame. Counts frames and reports the smoothed
+     *  frames-per-second every ~1s. */
     public static void refreshFps() {
         frameCounter++;
         long now = System.currentTimeMillis();

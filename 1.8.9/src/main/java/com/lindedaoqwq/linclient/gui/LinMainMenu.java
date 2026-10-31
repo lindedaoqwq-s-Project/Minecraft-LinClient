@@ -1,6 +1,6 @@
 package com.lindedaoqwq.linclient.gui;
 
-import com.lindedaoqwq.linclient.config.ModConfig;
+import com.lindedaoqwq.linclient.config.ConfigManager;
 import com.lindedaoqwq.linclient.util.FontUtils;
 import com.lindedaoqwq.linclient.util.RenderUtils;
 import net.minecraft.client.renderer.GlStateManager;
@@ -54,7 +54,7 @@ public class LinMainMenu extends GuiScreen {
 
     @Override
     public void initGui() {
-        zh = ModConfig.isZh();
+        zh = ConfigManager.isZh();
         buttons.clear();
         String[] labels = zh
                 ? new String[]{"\u5355\u4eba\u6e38\u620f", "\u591a\u4eba\u6e38\u620f",

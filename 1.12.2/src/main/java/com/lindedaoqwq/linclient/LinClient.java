@@ -1,23 +1,29 @@
 package com.lindedaoqwq.linclient;
 
+import com.lindedaoqwq.linclient.bridge.ForgeBridge;
+import com.lindedaoqwq.linclient.config.ConfigManager;
 import com.lindedaoqwq.linclient.config.KeyBindings;
-import com.lindedaoqwq.linclient.config.ModConfig;
-import com.lindedaoqwq.linclient.event.ClientEvents;
-import net.minecraftforge.common.config.Configuration;
+import com.lindedaoqwq.linclient.module.ModuleManager;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.Mod.EventHandler;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
-import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
- * LinClient - a practical, open-source, NON-CHEATING Minecraft client mod (Forge 1.12.2).
+ * LinClient - a practical, open-source, NON-CHEATING Minecraft client mod (Forge 1.8.9).
  *
- * Scope (client side only, no server-side behaviour changes, no hidden server info):
- *   - HUD information display (self / entities / input / environment / items / other / combat)
- *   - Client-side visual & performance toggles
- *   - An in-game ClickGUI opened with Right Shift, plus a standalone Home screen (F8)
+ * Architecture (rewritten):
+ *   module/    self-contained Module objects (base + 28 implementations)
+ *   setting/   typed, persistence-aware settings with visibility conditions
+ *   event/     own MethodHandle event bus; bridge/ForgeBridge is the only Forge listener
+ *   config/    JSON store with schema version, backups and legacy .cfg import
+ *   hud/       HUD render pipeline + drag editor
+ *   gui/       single-window ClickGUI on the shared dark-glass theme
+ *   hooks/     coremod byte-code hooks (see core/LinClientTransformer)
+ *
+ * Scope: client side only, no server behaviour changes, no unfair advantages.
  */
 @Mod(modid = LinClient.MOD_ID, name = LinClient.MOD_NAME, version = LinClient.VERSION,
         clientSideOnly = true, acceptedMinecraftVersions = "[1.12.2]")
@@ -28,14 +34,13 @@ public class LinClient {
     public static final Logger LOGGER = LogManager.getLogger(MOD_NAME);
 
     @EventHandler
-    public void preInit(FMLPreInitializationEvent event) {
-        ModConfig.init(new Configuration(event.getSuggestedConfigurationFile()));
-    }
-
-    @EventHandler
     public void init(FMLInitializationEvent event) {
+        ConfigManager.load();                 // JSON config (imports legacy .cfg once)
+        ModuleManager.registerAll();          // instantiate + subscribe all modules
+        ModuleManager.applyConfig();          // apply stored switches & settings
         KeyBindings.register();
-        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(new ClientEvents());
-        LOGGER.info("LinClient initialized (client, 1.12.2).");
+        MinecraftForge.EVENT_BUS.register(new ForgeBridge());
+        LOGGER.info("LinClient initialized (client, 1.12.2, {} modules).",
+                ModuleManager.all().size());
     }
 }

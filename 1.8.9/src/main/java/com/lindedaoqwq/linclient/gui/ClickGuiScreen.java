@@ -1,8 +1,15 @@
 package com.lindedaoqwq.linclient.gui;
 
-import com.lindedaoqwq.linclient.config.ModConfig;
-import com.lindedaoqwq.linclient.core.Modules;
+import com.lindedaoqwq.linclient.config.ConfigManager;
 import com.lindedaoqwq.linclient.hud.HudEditorScreen;
+import com.lindedaoqwq.linclient.module.Category;
+import com.lindedaoqwq.linclient.module.Module;
+import com.lindedaoqwq.linclient.module.ModuleManager;
+import com.lindedaoqwq.linclient.module.setting.BooleanSetting;
+import com.lindedaoqwq.linclient.module.setting.ColorSetting;
+import com.lindedaoqwq.linclient.module.setting.ModeSetting;
+import com.lindedaoqwq.linclient.module.setting.NumberSetting;
+import com.lindedaoqwq.linclient.module.setting.Setting;
 import com.lindedaoqwq.linclient.util.RenderUtils;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.ScaledResolution;
@@ -10,30 +17,27 @@ import org.lwjgl.input.Mouse;
 import org.lwjgl.opengl.GL11;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
-/** LinClient ClickGUI — structure inspired by modern glass-panel clients (FPSMaster
- *  Edge-style rows, not a copy): centred panel, left sidebar (brand, search, category
- *  nav with counts, HUD editor), main area with single-column module rows showing
- *  name + description inline, iOS-style toggle and an expand chevron. Rows with
- *  settings expand IN PLACE into a two-column settings grid (sliders / colour dots).
- *  LinClient sky-blue branding is kept (accent), not the reference indigo. */
+/** LinClient ClickGUI: centred single-window glass panel (structure inspired by modern
+ *  client GUIs, not a copy of any one client). Left sidebar: brand, search, category
+ *  nav with counts, HUD layout editor entry. Main area: module rows with an iOS-style
+ *  toggle and an expand chevron; rows with settings expand in place into a two-column
+ *  grid of toggles / sliders / mode pickers / colour dots. Sky-blue accent is kept. */
 public class ClickGuiScreen extends GuiScreen {
 
     private static class Row {      // a module row in the list
         int x, y, w, h;
-        Modules.Def def;
-        Row(int x, int y, int w, int h, Modules.Def def) {
-            this.x = x; this.y = y; this.w = w; this.h = h; this.def = def;
+        Module module;
+        Row(int x, int y, int w, int h, Module module) {
+            this.x = x; this.y = y; this.w = w; this.h = h; this.module = module;
         }
     }
 
-    private static class Ctrl {     // a control row inside an expanded settings grid
+    private static class Ctrl {     // a control cell inside an expanded settings grid
         int x, y, w, h;
-        Modules.Setting set;
-        Ctrl(int x, int y, int w, int h, Modules.Setting set) {
+        Setting<?> set;
+        Ctrl(int x, int y, int w, int h, Setting<?> set) {
             this.x = x; this.y = y; this.w = w; this.h = h; this.set = set;
         }
     }
@@ -43,29 +47,16 @@ public class ClickGuiScreen extends GuiScreen {
             0xFF3ADF6E, 0xFF3ADFE0, 0xFF3AA6F0, 0xFFB03ADF
     };
 
-    // ---- tokens (dark glass, LinClient sky-blue accent) ----
-    private static final int ACCENT       = 0xFF3FA9FF;
-    private static final int GLASS        = 0xF20C0D10;
-    private static final int STROKE       = 0x14FFFFFF;
-    private static final int STROKE_STRONG= 0x2EFFFFFF;
-    private static final int LAYER        = 0x0BFFFFFF;
-    private static final int LAYER_HOVER  = 0x14FFFFFF;
-    private static final int LAYER_ACTIVE = 0x1FFFFFFF;
-    private static final int TEXT         = 0xFFF2F2F2;
-    private static final int TEXT_2       = 0xFF9A9A9A;
-    private static final int TEXT_3       = 0xFF5C5C5C;
-
     private int selected = 0;
     private String search = "";
     private boolean searchFocus = false;
     private String expandedId = null;    // module whose settings grid is open
-    private String colorTarget = null;   // module id for the colour popup
+    private Module colorTarget = null;   // module whose colour popup is open
     private int scrollOff = 0;
     private boolean zh;
 
     private final List<Row> rows = new ArrayList<Row>();
     private final List<Ctrl> ctrls = new ArrayList<Ctrl>();
-    private final Map<String, Ctrl> sliderCtrls = new HashMap<String, Ctrl>();
 
     private int px, py, pw, ph;
     private final int sideW = 92;
@@ -73,15 +64,14 @@ public class ClickGuiScreen extends GuiScreen {
 
     private boolean dragBar = false;
     private int grabBY;
-    private String dragSlider = null;
-    private Ctrl dragCtrl = null;
+    private Ctrl dragSlider = null;
 
     @Override
     public boolean doesGuiPauseGame() { return false; }
 
     @Override
     public void initGui() {
-        zh = ModConfig.isZh();
+        zh = ConfigManager.isZh();
         scrollOff = 0;
     }
 
@@ -93,45 +83,60 @@ public class ClickGuiScreen extends GuiScreen {
     private int contentX() { return px + sideW + 8; }
     private int contentW() { return px + pw - 8 - contentX(); }
 
-    private int rowHeight(Modules.Def d) {
-        return d.id.equals(expandedId) ? 22 + settingsH(d) : 22;
+    private List<Setting<?>> visibleSettings(Module m) {
+        List<Setting<?>> out = new ArrayList<Setting<?>>();
+        for (Setting<?> s : m.settings()) {
+            if (s.visible() && usable(s)) out.add(s);
+        }
+        return out;
     }
 
-    private int settingsH(Modules.Def d) {
-        if (d.settings.isEmpty()) return 0;
-        int rows2 = (d.settings.size() + 1) / 2;
+    /** Setting types the grid can render (TextSetting is reserved for future use). */
+    private static boolean usable(Setting<?> s) {
+        return s instanceof BooleanSetting || s instanceof NumberSetting
+                || s instanceof ColorSetting || s instanceof ModeSetting;
+    }
+
+    private int settingsH(Module m) {
+        List<Setting<?>> ss = visibleSettings(m);
+        if (ss.isEmpty()) return 0;
+        int rows2 = (ss.size() + 1) / 2;
         return 1 + 4 + rows2 * 19 + 3;   // divider + pad + grid + pad
+    }
+
+    private int rowHeight(Module m) {
+        return m.id.equals(expandedId) ? 22 + settingsH(m) : 22;
     }
 
     private int contentH() {
         int h = 0;
-        for (Modules.Def d : visibleDefs()) h += rowHeight(d) + 3;
+        for (Module m : visibleModules()) h += rowHeight(m) + 3;
         return h;
     }
 
     private int maxScroll() { return Math.max(0, contentH() - (listBottom - listTop)); }
 
-    private int catCount(String cat) {
+    private int catCount(Category cat) { return ModuleManager.byCategory(cat).size(); }
+
+    private int catEnabled(Category cat) {
         int n = 0;
-        for (Modules.Def d : Modules.ALL) if (d.cat.equals(cat)) n++;
+        for (Module m : ModuleManager.byCategory(cat)) {
+            if (m.isEnabled()) n++;
+        }
         return n;
     }
 
-    private int catEnabled(String cat) {
-        int n = 0;
-        for (Modules.Def d : Modules.ALL) if (d.cat.equals(cat) && Modules.on(d.id)) n++;
-        return n;
-    }
-
-    private List<Modules.Def> visibleDefs() {
-        List<Modules.Def> out = new ArrayList<Modules.Def>();
+    private List<Module> visibleModules() {
+        List<Module> out = new ArrayList<Module>();
         String q = search.trim().toLowerCase();
-        for (Modules.Def d : Modules.ALL) {
+        Category[] cats = Category.values();
+        Category sel = cats[Math.min(selected, cats.length - 1)];
+        for (Module m : ModuleManager.all()) {
             if (q.isEmpty()) {
-                if (d.cat.equals(Modules.CATS[selected])) out.add(d);
+                if (m.category == sel) out.add(m);
             } else {
-                String hay = (d.label + " " + d.labelZh).toLowerCase();
-                if (hay.contains(q)) out.add(d);
+                String hay = (m.name + " " + m.nameZh + " " + m.desc + " " + m.descZh).toLowerCase();
+                if (hay.contains(q)) out.add(m);
             }
         }
         return out;
@@ -140,21 +145,18 @@ public class ClickGuiScreen extends GuiScreen {
     private void buildRows() {
         rows.clear();
         ctrls.clear();
-        sliderCtrls.clear();
         int y = listTop - scrollOff;
         int x0 = contentX();
-        for (Modules.Def d : visibleDefs()) {
-            int h = rowHeight(d);
-            rows.add(new Row(x0, y, contentW(), h, d));
-            if (d.id.equals(expandedId) && !d.settings.isEmpty()) {
+        for (Module m : visibleModules()) {
+            int h = rowHeight(m);
+            rows.add(new Row(x0, y, contentW(), h, m));
+            if (m.id.equals(expandedId)) {
+                List<Setting<?>> ss = visibleSettings(m);
                 int gy = y + 22 + 1 + 4;
                 int colW = (contentW() - 12 - 6) / 2;
-                for (int i = 0; i < d.settings.size(); i++) {
-                    Modules.Setting s = d.settings.get(i);
+                for (int i = 0; i < ss.size(); i++) {
                     int cx = x0 + 6 + (i % 2) * (colW + 6);
-                    Ctrl c = new Ctrl(cx, gy + (i / 2) * 19, colW, 19, s);
-                    ctrls.add(c);
-                    if (!s.isColor) sliderCtrls.put(s.id, c);
+                    ctrls.add(new Ctrl(cx, gy + (i / 2) * 19, colW, 19, ss.get(i)));
                 }
             }
             y += h + 3;
@@ -182,25 +184,26 @@ public class ClickGuiScreen extends GuiScreen {
 
         // world veil + glass panel
         RenderUtils.drawRect(0, 0, width, height, 0x94000000);
-        RenderUtils.drawRounded(px, py, pw, ph, STROKE_STRONG, 9);
-        RenderUtils.drawRounded(px + 1, py + 1, pw - 2, ph - 2, GLASS, 8);
+        RenderUtils.drawRounded(px, py, pw, ph, Theme.STROKE_STRONG, 9);
+        RenderUtils.drawRounded(px + 1, py + 1, pw - 2, ph - 2, Theme.GLASS, 8);
 
         // ---- sidebar ----
-        RenderUtils.drawRect(px + sideW, py + 6, 1, ph - 12, STROKE);
+        RenderUtils.drawRect(px + sideW, py + 6, 1, ph - 12, Theme.STROKE);
         drawSidebar(mouseX, mouseY);
 
         // ---- main head ----
         boolean searching = !search.trim().isEmpty();
-        String title = searching ? (zh ? "\u641c\u7d22" : "Search")
-                : Modules.catLabel(Modules.CATS[selected], zh);
-        fontRendererObj.drawStringWithShadow(title, contentX(), py + 9, TEXT);
+        Category[] cats = Category.values();
+        Category sel = cats[Math.min(selected, cats.length - 1)];
+        String title = searching ? (zh ? "\u641c\u7d22" : "Search") : sel.text(zh);
+        fontRendererObj.drawStringWithShadow(title, contentX(), py + 9, Theme.TEXT);
         String sub = searching
-                ? (visibleDefs().size() + (zh ? " \u4e2a\u7ed3\u679c" : " results"))
-                : (visibleDefs().size() + (zh ? " \u4e2a\u6a21\u5757 \u00b7 \u5df2\u542f\u7528 "
-                    + catEnabled(Modules.CATS[selected]) + " \u4e2a"
-                    : " modules \u00b7 " + catEnabled(Modules.CATS[selected]) + " on"));
+                ? (visibleModules().size() + (zh ? " \u4e2a\u7ed3\u679c" : " results"))
+                : (visibleModules().size() + (zh ? " \u4e2a\u6a21\u5757 \u00b7 \u5df2\u542f\u7528 "
+                    + catEnabled(sel) + " \u4e2a"
+                    : " modules \u00b7 " + catEnabled(sel) + " on"));
         fontRendererObj.drawStringWithShadow(sub, contentX() + 10
-                + fontRendererObj.getStringWidth(title), py + 11, TEXT_2);
+                + fontRendererObj.getStringWidth(title), py + 11, Theme.TEXT_2);
 
         // ---- module rows (clipped) ----
         GL11.glEnable(GL11.GL_SCISSOR_TEST);
@@ -230,21 +233,22 @@ public class ClickGuiScreen extends GuiScreen {
     private void drawSidebar(int mouseX, int mouseY) {
         int sx = px + 7;
         int pad = 7;
-        // brand: gradient-ish mark + name + version
+        // brand: mark + name + version
         int mX = sx, mY = py + 8;
-        RenderUtils.drawRounded(mX, mY, 12, 12, ACCENT, 4);
+        RenderUtils.drawRounded(mX, mY, 12, 12, Theme.ACCENT, 4);
         GL11.glPushMatrix();
         GL11.glTranslatef(mX + 3.5F, mY + 2.5F, 0);
         fontRendererObj.drawStringWithShadow("L", 0, 0, 0xFFFFFFFF);
         GL11.glPopMatrix();
-        fontRendererObj.drawStringWithShadow("LinClient", mX + 16, mY + 0, TEXT);
-        fontRendererObj.drawStringWithShadow("1.0.0", mX + 16, mY + 8, TEXT_3);
+        fontRendererObj.drawStringWithShadow("LinClient", mX + 16, mY + 0, Theme.TEXT);
+        fontRendererObj.drawStringWithShadow(com.lindedaoqwq.linclient.LinClient.VERSION,
+                mX + 16, mY + 8, Theme.TEXT_3);
 
         // search (capsule)
         int swH = 15;
         int sy = py + 26;
         RenderUtils.drawRounded(sx, sy, sideW - 2 * pad, swH,
-                searchFocus ? ACCENT : STROKE, swH / 2);
+                searchFocus ? Theme.ACCENT : Theme.STROKE, swH / 2);
         RenderUtils.drawRounded(sx + 1, sy + 1, sideW - 2 * pad - 2, swH - 2,
                 0x40000000, swH / 2 - 1);
         GL11.glDisable(GL11.GL_TEXTURE_2D);
@@ -264,32 +268,32 @@ public class ClickGuiScreen extends GuiScreen {
         String show = search.isEmpty() && !searchFocus
                 ? (zh ? "\u641c\u7d22..." : "Search...") : search;
         fontRendererObj.drawStringWithShadow(show, sx + 13, sy + 4,
-                search.isEmpty() && !searchFocus ? TEXT_3 : TEXT);
+                search.isEmpty() && !searchFocus ? Theme.TEXT_3 : Theme.TEXT);
         if (searchFocus && (System.currentTimeMillis() / 500) % 2 == 0) {
             int tx = sx + 13 + fontRendererObj.getStringWidth(search);
-            RenderUtils.drawRect(tx + 1, sy + 3, 1, swH - 6, TEXT);
+            RenderUtils.drawRect(tx + 1, sy + 3, 1, swH - 6, Theme.TEXT);
         }
 
         // category nav with counts
+        Category[] cats = Category.values();
         int ny = py + 48;
-        for (int i = 0; i < Modules.CATS.length; i++) {
+        for (int i = 0; i < cats.length; i++) {
             boolean sel = search.trim().isEmpty() && i == selected;
             boolean hover = mouseX >= sx && mouseX <= sx + sideW - 2 * pad
                     && mouseY >= ny && mouseY <= ny + 16;
             if (sel) {
-                RenderUtils.drawRounded(sx, ny, sideW - 2 * pad, 16, ACCENT, 8);
+                RenderUtils.drawRounded(sx, ny, sideW - 2 * pad, 16, Theme.ACCENT, 8);
             } else if (hover) {
-                RenderUtils.drawRounded(sx, ny, sideW - 2 * pad, 16, LAYER_HOVER, 8);
+                RenderUtils.drawRounded(sx, ny, sideW - 2 * pad, 16, Theme.LAYER_HOVER, 8);
             }
-            drawIcon(Modules.CATS[i], sx + 5, ny + 4, 8,
-                    sel ? 0xFFFFFFFF : (hover ? 0xFFD0D4DA : TEXT_2));
-            String label = Modules.catLabel(Modules.CATS[i], zh);
-            fontRendererObj.drawStringWithShadow(label, sx + 16, ny + 4,
-                    sel ? 0xFFFFFFFF : (hover ? 0xFFE8EAEE : TEXT_2));
-            String n = String.valueOf(catCount(Modules.CATS[i]));
+            drawIcon(cats[i].name().toLowerCase(), sx + 5, ny + 4, 8,
+                    sel ? 0xFFFFFFFF : (hover ? 0xFFD0D4DA : Theme.TEXT_2));
+            fontRendererObj.drawStringWithShadow(cats[i].text(zh), sx + 16, ny + 4,
+                    sel ? 0xFFFFFFFF : (hover ? 0xFFE8EAEE : Theme.TEXT_2));
+            String n = String.valueOf(catCount(cats[i]));
             fontRendererObj.drawStringWithShadow(n, sx + sideW - 2 * pad - 2
                     - fontRendererObj.getStringWidth(n), ny + 4,
-                    sel ? 0xCCFFFFFF : TEXT_3);
+                    sel ? 0xCCFFFFFF : Theme.TEXT_3);
             ny += 18;
         }
 
@@ -297,26 +301,26 @@ public class ClickGuiScreen extends GuiScreen {
         int hy = py + ph - 24;
         boolean hHover = mouseX >= sx && mouseX <= sx + sideW - 2 * pad
                 && mouseY >= hy && mouseY <= hy + 16;
-        if (hHover) RenderUtils.drawRounded(sx, hy, sideW - 2 * pad, 16, LAYER_HOVER, 8);
-        drawIcon("hudedit", sx + 5, hy + 4, 8, hHover ? 0xFFD0D4DA : TEXT_2);
+        if (hHover) RenderUtils.drawRounded(sx, hy, sideW - 2 * pad, 16, Theme.LAYER_HOVER, 8);
+        drawIcon("hudedit", sx + 5, hy + 4, 8, hHover ? 0xFFD0D4DA : Theme.TEXT_2);
         fontRendererObj.drawStringWithShadow(zh ? "HUD \u5e03\u5c40" : "HUD Layout",
-                sx + 16, hy + 4, hHover ? 0xFFE8EAEE : TEXT_2);
+                sx + 16, hy + 4, hHover ? 0xFFE8EAEE : Theme.TEXT_2);
     }
 
     private void drawModuleRow(Row r, int mouseX, int mouseY) {
-        Modules.Def d = r.def;
-        boolean expanded = d.id.equals(expandedId);
-        boolean on = Modules.on(d.id);
+        Module m = r.module;
+        boolean expanded = m.id.equals(expandedId);
+        boolean on = m.isEnabled();
         boolean hover = mouseX >= r.x && mouseX <= r.x + r.w && mouseY >= r.y && mouseY <= r.y + 22;
         int h = expanded ? r.h : 22;
-        int bg = expanded ? 0x2E000000 : (hover ? LAYER_HOVER : LAYER);
-        RenderUtils.drawRounded(r.x, r.y, r.w, h, expanded ? STROKE_STRONG : 0x0AFFFFFF, 5);
+        int bg = expanded ? 0x2E000000 : (hover ? Theme.LAYER_HOVER : Theme.LAYER);
+        RenderUtils.drawRounded(r.x, r.y, r.w, h, expanded ? Theme.STROKE_STRONG : 0x0AFFFFFF, 5);
         RenderUtils.drawRounded(r.x + 1, r.y + 1, r.w - 2, h - 2, bg, 4);
 
         // name + inline description
-        String name = Modules.label(d, zh);
-        fontRendererObj.drawStringWithShadow(name, r.x + 7, r.y + 7, TEXT);
-        String desc = Modules.desc(d, zh);
+        String name = m.label(zh);
+        fontRendererObj.drawStringWithShadow(name, r.x + 7, r.y + 7, Theme.TEXT);
+        String desc = m.desc(zh);
         int nx = r.x + 7 + fontRendererObj.getStringWidth(name) + 6;
         int maxDesc = r.w - 100 - (nx - r.x);
         if (maxDesc > 20) {
@@ -324,13 +328,13 @@ public class ClickGuiScreen extends GuiScreen {
                 desc = fontRendererObj.trimStringToWidth(desc, maxDesc - 4) + "...";
             }
             fontRendererObj.drawStringWithShadow(desc, nx, r.y + 7,
-                    expanded ? TEXT_2 : TEXT_3);
+                    expanded ? Theme.TEXT_2 : Theme.TEXT_3);
         }
 
         // iOS-style switch (right)
         int swW = 18, swH = 10;
         int swX = r.x + r.w - swW - 16, swY = r.y + 6;
-        RenderUtils.drawRounded(swX, swY, swW, swH, on ? ACCENT : LAYER_ACTIVE, swH / 2);
+        RenderUtils.drawRounded(swX, swY, swW, swH, on ? Theme.ACCENT : Theme.LAYER_ACTIVE, swH / 2);
         int k = swH - 2;
         int kx = on ? swX + swW - k - 1 : swX + 1;
         RenderUtils.drawRounded(kx, swY + 1, k, k, 0xFFEAECEF, k / 2);
@@ -353,69 +357,87 @@ public class ClickGuiScreen extends GuiScreen {
         GL11.glColor4f(1F, 1F, 1F, 1F);
 
         // expanded settings grid (two columns)
-        if (expanded && !d.settings.isEmpty()) {
+        if (expanded) {
             int divY = r.y + 22;
-            RenderUtils.drawRect(r.x + 4, divY, r.w - 8, 1, STROKE);
+            RenderUtils.drawRect(r.x + 4, divY, r.w - 8, 1, Theme.STROKE);
             for (Ctrl c : ctrls) {
-                if (c.set.isColor) {
-                    fontRendererObj.drawStringWithShadow(c.set.text(zh), c.x, c.y + 1, TEXT_2);
-                    int cur = ModConfig.color(d.id, c.set.colorDef);
-                    String hex = String.format("#%06X", cur & 0xFFFFFF);
-                    fontRendererObj.drawStringWithShadow(hex, c.x + c.w - 24
-                            - fontRendererObj.getStringWidth(hex), c.y + 1, TEXT_3);
-                    RenderUtils.drawRounded(c.x + c.w - 9, c.y, 9, 9, 0x40FFFFFF, 4);
-                    RenderUtils.drawRounded(c.x + c.w - 8, c.y + 1, 7, 7, cur, 3);
-                } else {
-                    float v = ModConfig.value(c.set.id, c.set.def);
-                    float frac = Math.max(0F, Math.min(1F, (v - c.set.min) / (c.set.max - c.set.min)));
-                    fontRendererObj.drawStringWithShadow(c.set.text(zh), c.x, c.y + 1, TEXT_2);
-                    String val = fmt(c.set, v);
-                    fontRendererObj.drawStringWithShadow(val, c.x + c.w
-                            - fontRendererObj.getStringWidth(val), c.y + 1, TEXT_2);
-                    int tX = c.x, tW = c.w - 26, tY = c.y + 12;
-                    RenderUtils.drawRounded(tX, tY, tW, 3, LAYER_ACTIVE, 1);
-                    RenderUtils.drawRounded(tX, tY, Math.max(2, (int) (tW * frac)), 3, ACCENT, 1);
-                    RenderUtils.drawRounded(tX + (int) (tW * frac) - 3, tY - 2, 7, 7,
-                            0xFFEAECEF, 3);
-                }
+                drawCtrl(m, c);
             }
         }
     }
 
-    private void drawColorPopup() {
-        Modules.Def d = Modules.byId(colorTarget);
-        int cur;
-        int def = 0xFF3AA6F0;
-        if (d != null) {
-            for (Modules.Setting s : d.settings) {
-                if (s.isColor) { def = s.colorDef; break; }
-            }
+    private void drawCtrl(Module m, Ctrl c) {
+        Setting<?> s = c.set;
+        if (s instanceof BooleanSetting) {
+            boolean v = ((BooleanSetting) s).get();
+            fontRendererObj.drawStringWithShadow(s.text(zh), c.x, c.y + 1, Theme.TEXT_2);
+            RenderUtils.drawRounded(c.x + c.w - 19, c.y, 18, 10,
+                    v ? Theme.ACCENT : Theme.LAYER_ACTIVE, 5);
+            int k = 8;
+            int kx = v ? c.x + c.w - 19 + 18 - k - 1 : c.x + c.w - 19 + 1;
+            RenderUtils.drawRounded(kx, c.y + 1, k, k, 0xFFEAECEF, k / 2);
+        } else if (s instanceof NumberSetting) {
+            NumberSetting n = (NumberSetting) s;
+            float v = n.get();
+            float frac = Math.max(0F, Math.min(1F, (v - n.min) / (n.max - n.min)));
+            fontRendererObj.drawStringWithShadow(s.text(zh), c.x, c.y + 1, Theme.TEXT_2);
+            String val = n.format(v);
+            fontRendererObj.drawStringWithShadow(val, c.x + c.w
+                    - fontRendererObj.getStringWidth(val), c.y + 1, Theme.TEXT_2);
+            int tX = c.x, tW = c.w - 26, tY = c.y + 12;
+            RenderUtils.drawRounded(tX, tY, tW, 3, Theme.LAYER_ACTIVE, 1);
+            RenderUtils.drawRounded(tX, tY, Math.max(2, (int) (tW * frac)), 3, Theme.ACCENT, 1);
+            RenderUtils.drawRounded(tX + (int) (tW * frac) - 3, tY - 2, 7, 7, 0xFFEAECEF, 3);
+        } else if (s instanceof ModeSetting) {
+            ModeSetting mode = (ModeSetting) s;
+            fontRendererObj.drawStringWithShadow(s.text(zh), c.x, c.y + 1, Theme.TEXT_2);
+            String val = "< " + mode.text(mode.get(), zh) + " >";
+            fontRendererObj.drawStringWithShadow(val, c.x + c.w
+                    - fontRendererObj.getStringWidth(val), c.y + 1, Theme.TEXT_2);
+        } else if (s instanceof ColorSetting) {
+            int cur = ((ColorSetting) s).get();
+            fontRendererObj.drawStringWithShadow(s.text(zh), c.x, c.y + 1, Theme.TEXT_2);
+            String hex = String.format("#%06X", cur & 0xFFFFFF);
+            fontRendererObj.drawStringWithShadow(hex, c.x + c.w - 24
+                    - fontRendererObj.getStringWidth(hex), c.y + 1, Theme.TEXT_3);
+            RenderUtils.drawRounded(c.x + c.w - 9, c.y, 9, 9, 0x40FFFFFF, 4);
+            RenderUtils.drawRounded(c.x + c.w - 8, c.y + 1, 7, 7, cur, 3);
         }
-        cur = ModConfig.color(colorTarget, def);
+    }
+
+    private void drawColorPopup() {
+        int def = 0xFF3AA6F0;
+        for (Setting<?> s : colorTarget.settings()) {
+            if (s instanceof ColorSetting) { def = ((ColorSetting) s).get(); break; }
+        }
+        ColorSetting target = findColor(colorTarget);
+        int cur = target != null ? target.get() : def;
         int pw2 = 190, ph2 = 30 + 4 * 40 + 16;
         int x = (width - pw2) / 2, y = (height - ph2) / 2;
         RenderUtils.drawRect(0, 0, width, height, 0x64000000);
-        RenderUtils.drawRounded(x, y, pw2, ph2, STROKE_STRONG, 9);
-        RenderUtils.drawRounded(x + 1, y + 1, pw2 - 2, ph2 - 2, GLASS, 8);
+        RenderUtils.drawRounded(x, y, pw2, ph2, Theme.STROKE_STRONG, 9);
+        RenderUtils.drawRounded(x + 1, y + 1, pw2 - 2, ph2 - 2, Theme.GLASS, 8);
         String title = zh ? "\u989c\u8272" : "Colour";
-        fontRendererObj.drawStringWithShadow(title, x + 12, y + 10, TEXT);
+        fontRendererObj.drawStringWithShadow(title, x + 12, y + 10, Theme.TEXT);
         String hex = String.format("#%06X", cur & 0xFFFFFF);
         fontRendererObj.drawStringWithShadow(hex, x + pw2 - 12
-                - fontRendererObj.getStringWidth(hex), y + 10, TEXT_2);
+                - fontRendererObj.getStringWidth(hex), y + 10, Theme.TEXT_2);
         for (int i = 0; i < PALETTE.length; i++) {
             int cx = x + 12 + (i % 4) * 42, cyy = y + 28 + (i / 4) * 40;
             RenderUtils.drawRounded(cx, cyy, 34, 34, PALETTE[i], 7);
         }
         String defS = zh ? "\u9ed8\u8ba4" : "Default";
         int dx = x + 12 + 3 * 42 + 4;
-        RenderUtils.drawRounded(dx, y + 28 + 3 * 40, 34, 34, LAYER, 7);
+        RenderUtils.drawRounded(dx, y + 28 + 3 * 40, 34, 34, Theme.LAYER, 7);
         RenderUtils.drawRounded(dx + 1, y + 29 + 3 * 40, 32, 32, 0x12000000, 6);
-        fontRendererObj.drawStringWithShadow(defS, dx, y + 28 + 3 * 40 + 40, TEXT_3);
+        fontRendererObj.drawStringWithShadow(defS, dx, y + 28 + 3 * 40 + 40, Theme.TEXT_3);
     }
 
-    private String fmt(Modules.Setting s, float v) {
-        if (s.step >= 1F) return String.valueOf((int) v);
-        return String.format("%.1f", v);
+    private ColorSetting findColor(Module m) {
+        for (Setting<?> s : m.settings()) {
+            if (s instanceof ColorSetting) return (ColorSetting) s;
+        }
+        return null;
     }
 
     // ---------- vector icons (16 logical px, scalable) ----------
@@ -447,10 +469,6 @@ public class ClickGuiScreen extends GuiScreen {
             vertex(8, 3, 14, 8);  vertex(14, 8, 8, 13);
             vertex(8, 13, 2, 8);  vertex(2, 8, 8, 3);
             vertex(7, 7, 9, 9);   vertex(9, 7, 7, 9);
-        } else if (id.equals("other")) {           // three dots
-            GL11.glEnd();
-            GL11.glBegin(GL11.GL_QUADS);
-            dot(3, 7); dot(7.5F, 7); dot(12, 7);
         } else if (id.equals("hudedit")) {         // pencil
             vertex(3, 13, 11, 5);
             vertex(11, 5, 13, 3);
@@ -462,17 +480,9 @@ public class ClickGuiScreen extends GuiScreen {
         GL11.glPopMatrix();
     }
 
-    private void dot(float x, float y) {
-        vertexQ(x, y); vertexQ(x + 2, y); vertexQ(x + 2, y + 2); vertexQ(x, y + 2);
-    }
-
     private void vertex(float x1, float y1, float x2, float y2) {
         GL11.glVertex2f(x1, y1);
         GL11.glVertex2f(x2, y2);
-    }
-
-    private void vertexQ(float x, float y) {
-        GL11.glVertex2f(x, y);
     }
 
     // ---------- input ----------
@@ -498,7 +508,8 @@ public class ClickGuiScreen extends GuiScreen {
             for (int i = 0; i < PALETTE.length; i++) {
                 int cx = x + 12 + (i % 4) * 42, cyy = y + 28 + (i / 4) * 40;
                 if (mouseX >= cx && mouseX <= cx + 34 && mouseY >= cyy && mouseY <= cyy + 34) {
-                    ModConfig.setColor(colorTarget, PALETTE[i]);
+                    ColorSetting target = findColor(colorTarget);
+                    if (target != null) target.set(PALETTE[i]);
                     colorTarget = null;
                     return;
                 }
@@ -506,7 +517,8 @@ public class ClickGuiScreen extends GuiScreen {
             int dx = x + 12 + 3 * 42 + 4;
             if (mouseX >= dx && mouseX <= dx + 34 && mouseY >= y + 28 + 3 * 40
                     && mouseY <= y + 28 + 3 * 40 + 34) {
-                ModConfig.setColor(colorTarget, -1);
+                ColorSetting target = findColor(colorTarget);
+                if (target != null) target.reset();
                 colorTarget = null;
                 return;
             }
@@ -528,8 +540,9 @@ public class ClickGuiScreen extends GuiScreen {
         searchFocus = false;
 
         // category nav
+        Category[] cats = Category.values();
         int ny = py + 48;
-        for (int i = 0; i < Modules.CATS.length; i++) {
+        for (int i = 0; i < cats.length; i++) {
             if (mouseButton == 0 && mouseX >= sx && mouseX <= sx + sideW - 2 * pad
                     && mouseY >= ny && mouseY <= ny + 16) {
                 selected = i;
@@ -568,29 +581,39 @@ public class ClickGuiScreen extends GuiScreen {
         for (Row r : rows) {
             if (mouseX < r.x || mouseX > r.x + r.w || mouseY < r.y || mouseY > r.y + r.h) continue;
             if (mouseY < listTop - 2 || mouseY > listBottom + 2) continue;
-            Modules.Def d = r.def;
+            Module m = r.module;
             if (mouseY <= r.y + 22) {
                 int swW = 18;
                 int swX = r.x + r.w - swW - 16;
                 if (mouseX >= swX - 2 && mouseX <= swX + swW + 2) {
-                    ModConfig.toggle(d.id);
+                    m.toggle();
                     return;
                 }
-                if (!d.settings.isEmpty()) {
-                    expandedId = d.id.equals(expandedId) ? null : d.id;
+                if (!visibleSettings(m).isEmpty()) {
+                    expandedId = m.id.equals(expandedId) ? null : m.id;
                     clampScroll();
                 } else {
-                    ModConfig.toggle(d.id);
+                    m.toggle();
                 }
                 return;
             }
             for (Ctrl c : ctrls) {
                 if (mouseX < c.x || mouseX > c.x + c.w || mouseY < c.y || mouseY > c.y + c.h) continue;
-                if (c.set.isColor) {
-                    colorTarget = d.id;
-                } else {
-                    dragSlider = c.set.id;
-                    dragCtrl = c;
+                Setting<?> s = c.set;
+                if (s instanceof BooleanSetting) {
+                    BooleanSetting b = (BooleanSetting) s;
+                    b.set(!b.get());
+                } else if (s instanceof ModeSetting) {
+                    ModeSetting mode = (ModeSetting) s;
+                    // click left half = previous mode, right half = next mode
+                    int half = c.x + c.w / 2;
+                    mode.set(mouseX < half
+                            ? (mode.get() + mode.count() - 1) % mode.count()
+                            : mode.next());
+                } else if (s instanceof ColorSetting) {
+                    colorTarget = m;
+                } else if (s instanceof NumberSetting) {
+                    dragSlider = c;
                     applySlider(c, mouseX);
                 }
                 return;
@@ -600,14 +623,11 @@ public class ClickGuiScreen extends GuiScreen {
     }
 
     private void applySlider(Ctrl c, int mouseX) {
-        Modules.Setting s = c.set;
+        NumberSetting s = (NumberSetting) c.set;
         int tW = c.w - 26;
         float t = (mouseX - c.x) / (float) tW;
         t = Math.max(0F, Math.min(1F, t));
-        float v = s.min + t * (s.max - s.min);
-        v = Math.round(v / s.step) * s.step;
-        v = Math.max(s.min, Math.min(s.max, v));
-        ModConfig.setValue(s.id, v);
+        s.set(s.quantize(s.min + t * (s.max - s.min)));
     }
 
     @Override
@@ -619,8 +639,8 @@ public class ClickGuiScreen extends GuiScreen {
             int rel = mouseY - grabBY - listTop;
             scrollOff = maxScroll() > 0 ? rel * maxScroll() / (view - thumbH) : 0;
             clampScroll();
-        } else if (dragSlider != null && dragCtrl != null) {
-            applySlider(dragCtrl, mouseX);
+        } else if (dragSlider != null) {
+            applySlider(dragSlider, mouseX);
         }
     }
 
@@ -628,7 +648,7 @@ public class ClickGuiScreen extends GuiScreen {
     protected void mouseReleased(int mouseX, int mouseY, int state) {
         dragBar = false;
         dragSlider = null;
-        dragCtrl = null;
+        ConfigManager.saveNow();
     }
 
     @Override
@@ -637,7 +657,10 @@ public class ClickGuiScreen extends GuiScreen {
         if (key == 1) {   // ESC
             if (colorTarget != null) colorTarget = null;
             else if (searchFocus) searchFocus = false;
-            else mc.displayGuiScreen(null);
+            else {
+                ConfigManager.saveNow();
+                mc.displayGuiScreen(null);
+            }
             return;
         }
         if (searchFocus) {

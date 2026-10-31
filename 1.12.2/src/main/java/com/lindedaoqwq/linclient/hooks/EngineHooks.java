@@ -17,7 +17,8 @@ import net.minecraft.util.ResourceLocation;
  *  - Lightmap dirty-check : skip the 256-entry recompute + texture upload when the world and
  *                           gamma are unchanged (at most every 250 ms).
  * Retired (kept as safe pass-through so old injection points stay valid):
- *  - noHurtCam / skipParticle / skipSignText / armorResolve
+ *  - noHurtCam (now active again, reads the NoHurtCam module)
+ *  - skipParticle / skipSignText / armorResolve
  */
 public class EngineHooks {
     private static Object lastWorld = null;
@@ -51,9 +52,17 @@ public class EngineHooks {
         } catch (Throwable t) { return false; }
     }
 
-    /** Retired feature: never intercept. Signature kept for the injected guard. */
+    /** No Hurt Cam module: suppress hurtCameraEffect when enabled. Signature kept for
+     *  the injected guard; must never throw (guarded for early-startup calls). */
     public static boolean noHurtCam() {
-        return false;
+        try {
+            com.lindedaoqwq.linclient.module.impl.render.NoHurtCam m =
+                    com.lindedaoqwq.linclient.module.ModuleManager.get(
+                            com.lindedaoqwq.linclient.module.impl.render.NoHurtCam.class);
+            return m != null && m.isEnabled();
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /** Retired feature: never drop a particle. Signature kept for the injected guard. */
