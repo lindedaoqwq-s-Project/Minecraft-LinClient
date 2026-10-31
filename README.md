@@ -6,7 +6,7 @@
 <p align="center"><sub>A Minecraft Client</sub></p>
 
 <div align="center">
-  <img alt="Build Status" src="https://github.com/lindedaoqwq-s-Project/Minecraft-LinClient/actions/workflows/development.yml/badge.svg?branch=main">
+  <img alt="Build Status" src="https://github.com/lindedaoqwq-s-Project/Minecraft-LinClient/actions/workflows/build.yml/badge.svg?branch=main">
   <img alt="Downloads" src="https://img.shields.io/github/downloads/lindedaoqwq-s-Project/Minecraft-LinClient/total?label=Downloads&style=flat">
   <img alt="Release" src="https://img.shields.io/github/v/release/lindedaoqwq-s-Project/Minecraft-LinClient?style=flat">
   <img alt="License" src="https://img.shields.io/github/license/lindedaoqwq-s-Project/Minecraft-LinClient?style=flat">
