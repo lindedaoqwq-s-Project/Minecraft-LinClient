@@ -1,6 +1,6 @@
 # LinClient
 
-> [IMPORTANT!]
+> [!IMPORTANT]
 > LinClient因为某些原因现在计划一个大更新
 > 以下Readme的内容均已失效，望周知
 
